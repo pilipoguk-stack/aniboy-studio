@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>AniBoy Studio — Level 1 (Offline + Online)</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    body { font-family: Inter, system-ui, Arial; background:#f7fafc; color:#0f172a; margin:0; padding:20px; }
+    .wrap{max-width:980px;margin:0 auto}
+    h1{font-size:1.4rem;margin:0 0 10px}
+    .card{background:white;border-radius:10px;padding:14px;box-shadow:0 6px 18px rgba(2,6,23,0.06);margin-bottom:14px}
+    label{display:block;margin:8px 0 6px;font-weight:600;font-size:0.9rem}
+    input[type="file"]{display:block}
+    .controls{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+    button{background:#0ea5a4;border:none;color:white;padding:8px 12px;border-radius:8px;cursor:pointer}
+    button.secondary{background:#64748b}
+    canvas{display:block;width:100%;height:auto;border-radius:6px;background:#111}
+    .small{font-size:0.85rem;color:#475569}
+    a.download{display:inline-block;margin-top:8px;padding:8px 12px;background:#16a34a;color:white;border-radius:8px;text-decoration:none}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>AniBoy Studio — Level 1 (Sketch → Video)</h1>
+
+    <div class="card">
+      <label>1) Upload your sketch (PNG / JPG)</label>
+      <input id="file" type="file" accept="image/*" />
+
+      <label>2) Duration (seconds)</label>
+      <input id="duration" type="number" value="6" min="1" max="60" />
+
+      <label class="small">3) Controls</label>
+      <div class="controls">
+        <button id="previewBtn" class="secondary">Preview Animation</button>
+        <button id="recordBtn">Record Video</button>
+        <button id="stopBtn" class="secondary" disabled>Stop Recording</button>
+        <a id="download" class="download" style="display:none">Download Video</a>
+      </div>
+      <div class="small" style="margin-top:8px">Tip: Use a clean transparent PNG or white background sketch for best results.</div>
+    </div>
+
+    <div class="card">
+      <canvas id="canvas" width="1280" height="720"></canvas>
+    </div>
+
+    <div class="card small">
+      <strong>How to use (quick):</strong>
+      <ol>
+        <li>Open this file in your browser (double-click or open file).</li>
+        <li>Upload your sketch, press <em>Preview Animation</em> to see it play on canvas.</li>
+        <li>Press <em>Record Video</em> to create a downloadable WebM video. When finished, a download link appears.</li>
+      </ol>
+      <p>To publish online, upload the same file (`aniboy-studio.html`) to GitHub Pages or Netlify (instructions below).</p>
+    </div>
+
+    <div class="card small" id="log"></div>
+  </div>
+
+<script>
+(() => {
+  const fileEl = document.getElementById('file');
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d', { alpha: false });
+  const previewBtn = document.getElementById('previewBtn');
+  const recordBtn = document.getElementById('recordBtn');
+  const stopBtn = document.getElementById('stopBtn');
+  const download = document.getElementById('download');
+  const durationEl = document.getElementById('duration');
+  const log = document.getElementById('log');
+
+  let img = null;
+  let animHandle = null;
+  let isPlayingPreview = false;
+  let mediaRecorder = null;
+  let recordedBlobs = [];
+
+  // Load image from file input
+  fileEl.addEventListener('change', (ev) => {
+    const f = ev.target.files[0];
+    if (!f) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      img = new Image();
+      img.onload = () => {
+        // scale canvas to 1280x720 but maintain draw scaling
+        canvas.width = 1280;
+        canvas.height = 720;
+        drawFrameStatic(); // show one frame
+        log.innerText = `Loaded image: ${f.name} — ${img.width}x${img.height}`;
+      };
+      img.src = e.target.result;
+    };
+    reader.readAsDataURL(f);
+  });
+
+  function drawFrameAt(tNorm) {
+    // tNorm: 0..1
+    // Ken Burns parameters (tweak as you like)
+    const startScale = 1.0;
+    const endScale = 1.15; // slight zoom in
+    const sx = lerp(0.5, 0.45, tNorm); // normalized center x (0..1)
+    const sy = lerp(0.5, 0.48, tNorm); // normalized center y (0..1)
+    const scale = startScale + (endScale - startScale) * easeInOutQuad(tNorm);
+
+    // clear
+    ctx.fillStyle = '#111';
+    ctx.fillRect(0,0,canvas.width,canvas.height);
+
+    if (!img) {
+      // placeholder
+      ctx.fillStyle = '#334155';
+      ctx.fillRect(0,0,canvas.width,canvas.height);
+      ctx.fillStyle = '#fff';
+      ctx.font = '24px Arial';
+      ctx.fillText('Upload a sketch to preview animation', 36, 80);
+      return;
+    }
+
+    // compute draw size to fit image while preserving aspect ratio
+    const imgAR = img.width / img.height;
+    const canvasAR = canvas.width / canvas.height;
+    let drawW, drawH;
+    if (imgAR > canvasAR) {
+      // image wider -> fit to width
+      drawW = canvas.width * scale;
+      drawH = drawW / imgAR;
+    } else {
+      // image taller -> fit to height
+      drawH = canvas.height * scale;
+      drawW = drawH * imgAR;
+    }
+
+    // center positions based on sx,sy
+    const cx = sx * canvas.width;
+    const cy = sy * canvas.height;
+    const drawX = cx - drawW / 2;
+    const drawY = cy - drawH / 2;
+
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(img, drawX, drawY, drawW, drawH);
+  }
+
+  function drawFrameStatic(){
+    drawFrameAt(0);
+  }
+
+  function lerp(a,b,t){ return a + (b-a)*t; }
+  function easeInOutQuad(t){ return t<0.5 ? 2*t*t : -1 + (4-2*t)*t; }
+
+  // Preview animation (plays in canvas)
+  previewBtn.addEventListener('click', () => {
+    if (!img) { alert('Please upload an image first'); return; }
+    if (isPlayingPreview) {
+      cancelAnimationFrame(animHandle); isPlayingPreview=false; previewBtn.innerText='Preview Animation'; return;
+    }
+    const duration = Math.max(1, Number(durationEl.value) || 6) * 1000;
+    const start = performance.now();
+    isPlayingPreview = true;
+    previewBtn.innerText = 'Stop Preview';
+
+    function frame(now){
+      const t = Math.min(1, (now - start) / duration);
+      drawFrameAt(t);
+      if (t < 1 && isPlayingPreview) {
+        animHandle = requestAnimationFrame(frame);
+      } else {
+        isPlayingPreview = false;
+        previewBtn.innerText = 'Preview Animation';
+      }
+    }
+    animHandle = requestAnimationFrame(frame);
+  });
+
+  // Recording logic using MediaRecorder
+  recordBtn.addEventListener('click', async () => {
+    if (!img) { alert('Please upload an image first'); return; }
+    recordBtn.disabled = true; stopBtn.disabled = false; download.style.display = 'none'; download.href='';
+    recordedBlobs = [];
+
+    const fps = 30;
+    const stream = canvas.captureStream(fps);
+    const options = { mimeType: 'video/webm;codecs=vp9' };
+    try {
+      mediaRecorder = new MediaRecorder(stream, options);
+    } catch (e) {
+      try { mediaRecorder = new MediaRecorder(stream); } catch (err) { alert('Recording not supported in this browser'); recordBtn.disabled=false; stopBtn.disabled=true; return; }
+    }
+
+    mediaRecorder.ondataavailable = (e) => { if (e.data && e.data.size > 0) recordedBlobs.push(e.data); };
+    mediaRecorder.onstop = () => {
+      const blob = new Blob(recordedBlobs, { type: 'video/webm' });
+      const url = URL.createObjectURL(blob);
+      download.href = url;
+      download.download = `aniboy_${Date.now()}.webm`;
+      download.style.display = 'inline-block';
+      log.innerText = `Recording ready — ${Math.round(blob.size/1024)} KB`;
+      recordBtn.disabled = false;
+      stopBtn.disabled = true;
+    };
+
+    // start recording and the animation loop
+    mediaRecorder.start(100); // collect small chunks
+    const duration = Math.max(1, Number(durationEl.value) || 6) * 1000;
+    const start = performance.now();
+    function frame(now) {
+      const t = Math.min(1, (now - start) / duration);
+      drawFrameAt(t);
+      if (t < 1) {
+        animHandle = requestAnimationFrame(frame);
+      } else {
+        // stop after last frame (give a small delay to ensure recorder captured last chunk)
+        setTimeout(() => { if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop(); }, 200);
+      }
+    }
+    animHandle = requestAnimationFrame(frame);
+  });
+
+  stopBtn.addEventListener('click', () => {
+    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+      mediaRecorder.stop();
+    }
+    stopBtn.disabled = true;
+    recordBtn.disabled = false;
+  });
+
+  // initialize view
+  drawFrameStatic();
+  log.innerText = 'Ready — upload an image to begin.';
+})();
+</script>
+</body>
+</html>
